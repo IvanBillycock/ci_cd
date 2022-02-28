@@ -1,0 +1,24 @@
+stages:
+  - build
+#  - test
+
+variables:
+  DEPLOY_PATH: ARMTI-ASP.NET-Product-dev
+
+build-job:
+  tags:
+    - win
+  stage: build
+  script:
+    - echo "Building and publishing..."
+    - '& "${env:WIN_NUGET_PATH}" sources remove -Source "https://gitlab.timepath.ru/api/v4/projects/35/packages/nuget/index.json" -Name gitlab'
+    - '& "${env:WIN_NUGET_PATH}" sources add -Source "https://gitlab.timepath.ru/api/v4/projects/35/packages/nuget/index.json" -Name gitlab -UserName gitlab-ci-token -Password $CI_JOB_TOKEN'
+    - '& "${env:WIN_NUGET_PATH}" restore "${env:ASPNET_SLN}"'
+    - '& "${env:WIN_MSBUILD_PATH}" ".\${env:ASPNET_SLN}" /p:DeployOnBuild=true /p:PublishProfile=${env:PUBLISH_PROFILE} /p:AllowUntrustedCertificate=true /p:UserName=${env:DEPLOY_USER} /p:Password=${env:DEPLOY_PASS} /P:DeployIISAppPath=${env:DEPLOY_PATH}'
+    - echo "Building and publishing finished."  
+  environment:
+    name: dev/master-dev
+    deployment_tier: development
+  only:
+    variables:
+      - $CI_COMMIT_REF_PROTECTED == "true"
