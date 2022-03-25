@@ -41,7 +41,7 @@ steps:
     workingFolder: '$(SouceDir)'
 
 - script: |
-   npm config set //dh.ics.perm.ru:4873/:_authToken "$(npm_registry_authToken)"
+   npm config set //www:4873/:_authToken "$(npm_registry_authToken)"
    npm publish
   workingDirectory: '$(SouceDir)'
   displayName: 'Публикация аддона'
