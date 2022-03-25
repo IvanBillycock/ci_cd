@@ -1,0 +1,78 @@
+trigger:
+  tags:
+    include:
+    - v*
+
+pool:
+  name: FastAgents
+  demands:
+  - ember -equals 3.1.4
+
+variables:
+  app_name: 'portal-core-test'
+  repository0: 'portal-company-test'
+  repository1: 'pminst-portal'
+  repository2: 'nevod-portal'
+  repository3: 'neoplatform-portal'
+
+steps:
+- checkout: self
+  persistCredentials: true
+
+- task: CmdLine@1
+  displayName: 'Установка зависимостей bower'
+  inputs:
+    filename: bower
+    arguments: 'install -V --allow-root'
+    workingFolder: '$(SouceDir)'
+
+- task: CmdLine@1
+  displayName: 'Установка зависимостей yarn'
+  inputs:
+    filename: yarn
+    arguments: 'install --check-files --verbose'
+    workingFolder: '$(SouceDir)'
+
+- task: CmdLine@1
+  displayName: 'Сборка ember-приложения'
+  inputs:
+    filename: ember
+    arguments: build
+    workingFolder: '$(SouceDir)'
+
+- script: |
+   npm config set //dh.ics.perm.ru:4873/:_authToken "$(npm_registry_authToken)"
+   npm publish
+  workingDirectory: '$(SouceDir)'
+  displayName: 'Публикация аддона'
+  continueOnError: true
+  
+- script: |
+   git config --global user.email "ikotelnikov@ics.perm.ru"
+   git config --global user.name "ikotelnikov"
+   git config http.sslVerify "false"
+   TAG=$(git describe --tags $(git rev-list --tags --max-count=1) | sed 's/^.//')
+  workingDirectory: $(System.DefaultWorkingDirectory)
+
+# ---------------------------------------------------------------------- PR part ----------------------------------------------------------------------------
+- task: DeleteFiles@1
+  displayName: 'Remove Git Folder'
+  inputs:
+    contents: |
+      $(repository0)
+
+- script: |
+   git -c http.extraHeader="Authorization: Basic $(token)" clone https://dis-dev-ops.ics.perm.ru/Common/CASEBERRY/_git/$(repository0)
+   cd $(repository0)
+   git checkout -b $(Build.BuildNumber)
+   yarn add $(app_name)@$TAG
+   git add -A
+   git commit -m "from core BuildNumber $(Build.BuildNumber)"
+   git -c http.extraHeader="Authorization: Basic $(token)" push https://dis-dev-ops.ics.perm.ru/Common/CASEBERRY/_git/$(repository0) --all
+  displayName: Yarn add new dependencies
+  workingDirectory: $(System.DefaultWorkingDirectory)
+
+- script: |
+   curl --insecure --location --request POST 'https://dis-dev-ops.ics.perm.ru/Common/CASEBERRY/_apis/git/repositories/$(repository0)/pullrequests?api-version=5.0' --header 'Authorization: Basic $(token)' --header 'Content-Type: application/json' --data-raw '{"sourceRefName": "refs/heads/$(Build.BuildNumber)", "targetRefName": "refs/heads/master", "title": "$(Build.BuildNumber)", "description": "from core pipeline", "reviewers": [{"id": "2a7698f6-bbab-4741-ac0a-4e71c28ba2cd"}]}'
+  displayName: Create Pull Request
+# ---------------------------------------------------------------------- PR part ----------------------------------------------------------------------------
