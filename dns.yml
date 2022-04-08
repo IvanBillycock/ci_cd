@@ -1,0 +1,24 @@
+stages:
+  - deploy
+
+deploy-job:
+  only:
+    - main
+  tags:
+    - docker
+  stage: deploy
+  before_script:
+    ##
+    ## https://docs.gitlab.com/ee/ci/ssh_keys/
+    ##
+    - 'command -v ssh-agent >/dev/null || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $SAMBA_SERVER >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+  script:
+    - scp -P22 -r ./* $SSH_USER@$SAMBA_SERVER:/home/timepath/dns_from_gitlab
+    - ssh -p22 $SSH_USER@$SAMBA_SERVER "cd dns_from_gitlab && sudo bash dns.sh dns_records $SAMBA_DOMAIN $SAMBA_AUTHENTICATION"
