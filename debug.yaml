@@ -1,0 +1,23 @@
+services:
+  - name: docker:20.10.22-dind
+    alias: docker
+    
+stages:
+  - build
+
+variables:
+#  DOCKER_HOST: tcp://172.17.0.2:2375
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+
+
+"Build":
+  stage: build
+  only:
+    - main
+
+  tags:
+    - linux-dind
+  script:
+    - echo $ENV
+    - docker ps

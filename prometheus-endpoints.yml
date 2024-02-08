@@ -1,0 +1,28 @@
+variables:
+  DOCKER_TLS_CERTDIR: ""
+
+services:
+  - name: docker:20.10.22-dind
+    alias: docker
+
+#------------------------------------------------------------------------------------------------------------------------   
+stages:
+  - Deploy
+
+#------------------------------------------------------------------------------------------------------------------------   
+Deploy:
+  stage: Deploy
+  image: gitlabsup.ibs.ru:5050/ops/ansible-image/ansible:latest
+  tags:
+    - linux-dind
+  before_script:
+    - eval $(ssh-agent -s)
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - cp "$SSH_KNOWN_HOSTS" ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - chmod 400 "$SSH_PRIVATE_KEY"
+    - ssh-add "$SSH_PRIVATE_KEY"
+  script:
+    - cp -f "$PLAYBOOK" ./playbook.yml
+    - ansible-playbook playbook.yml -i inventory.yml

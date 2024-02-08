@@ -1,0 +1,89 @@
+variables:
+  MSBUILD: 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\msbuild.exe'
+  ASPNETCOMPILER: 'C:\WINDOWS\Microsoft.NET\Framework\v4.0.30319\aspnet_compiler.exe'
+  tfsApp: 'C:\Program Files (x86)\Microsoft Visual Studio 10.0\Common7\IDE\tf.exe'
+  compiled_app_dir: '.\compiled_app'
+
+stages:
+  - build
+  - delivery
+
+"Build":
+  stage: build
+  only:
+    - Test2
+  tags:
+    - CiCDSUP
+  script:
+    - New-Item -ItemType Directory -Force -path "${compiled_app_dir}"
+    - Get-ChildItem -Path "${compiled_app_dir}" -Include * -File -Recurse | foreach { $_.Delete()}
+    - set-alias -name msbuild -value $MSBUILD
+    - set-alias -name aspnet_compiler -value $ASPNETCOMPILER
+### ---- msbuild is finished with errors, so it is a crutch
+    - echo 'msbuild .\NewVnsp.sln /t:Build /p:Configuration=Release /p:Platform="Any CPU" /clp:ErrorsOnly; exit 0' > msbuild.ps1
+    - .\msbuild.ps1
+### ----
+    - aspnet_compiler -v /MyApp -p ".\NewVnsp.WebApp" -f -u "${compiled_app_dir}"
+    - rm ${compiled_app_dir}\App_Start -r -Force
+    - rm ${compiled_app_dir}\Controllers -r -Force
+    - rm ${compiled_app_dir}\obj -r -Force
+    - rm ${compiled_app_dir}\Properties -r -Force
+    - rm ${compiled_app_dir}\*.cd -r -Force
+    - rm ${compiled_app_dir}\*.user -r -Force
+    - rm ${compiled_app_dir}\*.csproj -r -Force
+    - rm ${compiled_app_dir}\*.vspscc -r -Force
+    - rm ${compiled_app_dir}\Web.Debug.config -Force
+    - rm ${compiled_app_dir}\Web.Release.config -Force
+    - rm ${compiled_app_dir}\packages.config -Force
+    - Copy-Item ".\SysTools\DeployFiles\test_Web_config" -Destination ${compiled_app_dir}\web.config -Force
+    - $curentdata = Get-Date -Format "yyyy.MM.dd"
+    - Compress-Archive -Path ${compiled_app_dir}\* -DestinationPath .\NewVnSpTest.${curentdata}.zip
+    - Copy-Item ".\SysTools\DeployFiles\prod_Web_config" -Destination ${compiled_app_dir}\web.config -Force
+    - Compress-Archive -Path ${compiled_app_dir}\* -DestinationPath .\NewVnSpProd.${curentdata}.zip
+    - Compress-Archive -Path .\NewVnsp.JobService\* -DestinationPath .\NewVnsp.JobService.${curentdata}.zip
+    - Compress-Archive -Path .\NewVnSp.WinService\* -DestinationPath .\NewVnSp.WinService.${curentdata}.zip
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -InFile NewVnSpProd.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/NewVnSpProd/0.0.1/NewVnSpProd.${curentdata}.zip" -Method put
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -InFile NewVnSpTest.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/NewVnSpTest/0.0.1/NewVnSpTest.${curentdata}.zip" -Method put
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -InFile NewVnsp.JobService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/JobService/0.0.1/NewVnsp.JobService.${curentdata}.zip" -Method put
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -InFile NewVnSp.WinService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/WinService/0.0.1/NewVnSp.WinService.${curentdata}.zip" -Method put
+    - dir
+
+"Delivery-Test":
+  stage: delivery
+  variables:
+    GIT_STRATEGY: none 
+  only:
+    - Test2
+  tags:
+    - CiCDSUP
+  script:
+    - $curentdata = Get-Date -Format "yyyy.MM.dd"
+    - $test = New-PSSession hq-ib-app-test.ibs.root.ibscorp.ru
+    - $fullpath = ($pwd).path
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnSpTest.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/NewVnSpTest/0.0.1/NewVnSpTest.${curentdata}.zip" -Method get
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnSp.JobService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/JobService/0.0.1/NewVnsp.JobService.${curentdata}.zip" -Method get
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnsp.WinService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/WinService/0.0.1/NewVnSp.WinService.${curentdata}.zip" -Method get
+    - Copy-Item -ToSession $test $fullpath\NewVnSp.JobService.${curentdata}.zip -Destination C:\Services\NewVnSp.JobService.${curentdata}.zip
+    - Copy-Item -ToSession $test $fullpath\NewVnsp.WinService.${curentdata}.zip -Destination C:\Services\NewVnsp.WinService.${curentdata}.zip
+    - Copy-Item -ToSession $test $fullpath\NewVnSpTest.${curentdata}.zip -Destination C:\inetpub\wwwroot\NewVnSp\NewVnSpTest.${curentdata}.zip
+    - Invoke-Command -ComputerName hq-ib-app-test.ibs.root.ibscorp.ru -ScriptBlock {dir C:\inetpub\wwwroot\NewVnSp}
+
+"Delivery-Prod":
+  stage: delivery
+  variables:
+    GIT_STRATEGY: none 
+  only:
+    - Test2
+  tags:
+    - CiCDSUP
+  script:
+    - $curentdata = Get-Date -Format "yyyy.MM.dd"
+    - $prod = New-PSSession hq-ib-vnsp-app.ibs.root.ibscorp.ru
+    - $fullpath = ($pwd).path
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnSpProd.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/NewVnSpProd/0.0.1/NewVnSpProd.${curentdata}.zip" -Method get
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnSp.JobService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/JobService/0.0.1/NewVnsp.JobService.${curentdata}.zip" -Method get
+    - Invoke-RestMethod -Headers @{ "JOB-TOKEN"="$CI_JOB_TOKEN" } -OutFile .\NewVnsp.WinService.${curentdata}.zip -uri "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/WinService/0.0.1/NewVnSp.WinService.${curentdata}.zip" -Method get
+    - Copy-Item -ToSession $prod $fullpath\NewVnSp.JobService.${curentdata}.zip -Destination C:\Services\NewVnSp.JobService.${curentdata}.zip
+    - Copy-Item -ToSession $prod $fullpath\NewVnsp.WinService.${curentdata}.zip -Destination C:\Services\NewVnsp.WinService.${curentdata}.zip
+    - Copy-Item -ToSession $prod $fullpath\NewVnSpProd.${curentdata}.zip -Destination C:\inetpub\wwwroot\NewVnSp\NewVnSpProd.${curentdata}.zip
+    - Invoke-Command -ComputerName hq-ib-vnsp-app.ibs.root.ibscorp.ru -ScriptBlock {dir C:\inetpub\wwwroot\NewVnSp}

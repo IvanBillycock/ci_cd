@@ -1,0 +1,125 @@
+variables:
+#  DOCKER_HOST: tcp://172.17.0.2:2375
+  DOCKER_TLS_CERTDIR: ""
+  MAVEN_OPTS: >-
+    -Dhttps.protocols=TLSv1.2
+    -Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository
+    -Dorg.slf4j.simpleLogger.showDateTime=true
+    -Djava.awt.headless=true
+
+  MAVEN_CLI_OPTS: >-
+    --batch-mode
+    --errors
+    --fail-at-end
+    --show-version
+    --no-transfer-progress
+    -DinstallAtEnd=true
+    -DdeployAtEnd=true
+  
+  ci_settings_sandbox: 'sandbox.xml'
+  ci_settings_prod: 'prod.xml'   
+
+services:
+  - name: docker:20.10.22-dind
+    alias: docker
+
+#------------------------------------------------------------------------------------------------------------------------   
+stages:
+  - build
+  - deploy
+
+#------------------------------------------------------------------------------------------------------------------------   
+build_publish wso2-sandbox:
+  stage: build
+  tags:
+    - linux-dind
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "sandbox"'
+  before_script:
+    - apk update
+    - apk add openjdk8
+    - apk add maven
+    - apk add curl     
+    - export PATH=${PATH}:${JAVA_HOME}/bin
+  script:
+    - if [ ! -f $ci_settings_sandbox ]; then
+        echo "CI settings missing\! If deploying to GitLab Maven Repository, please see https://docs.gitlab.com/ee/user/packages/maven_repository/index.html#create-maven-packages-with-gitlab-cicd for instructions.";
+      fi
+    - 'echo mvn -f $ci_settings_sandbox clean install -Dmaven.test.skip=true'
+    - 'mvn -f $ci_settings_sandbox clean install -Dmaven.test.skip=true'
+    - ls -la OCOIntegration_sandbox_deploy/target/
+    - ls -la OCOIntegration_sandbox_docker/
+    - cp -r OCOIntegration_sandbox_deploy/target/. OCOIntegration_sandbox_docker/CompositeApps
+    - ls -al OCOIntegration_sandbox_docker/CompositeApps
+##    - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
+    - docker login -u ikotelnikov -p ${TOKEN} $CI_REGISTRY
+    - echo list of existing images
+    - docker images
+    - echo "Building sandbox image"
+    - cd OCOIntegration_sandbox_docker
+    # Change image in Dockerfile
+    - sed -i '/^FROM.*/c\FROM gitlabsup.ibs.ru:5050/oco/wso2mi-image/wso2mi' ./Dockerfile
+    - sed -i '/^COPY Resources\/dev\..*/c\COPY Resources/dev.properties ${WSO2_SERVER_HOME}/conf/properties/prod.properties' ./Dockerfile
+    - docker build -t $CI_REGISTRY_IMAGE/sandbox:latest .
+    - echo "Pushing image with tag = $CI_REGISTRY_IMAGE:latest"
+    - docker push $CI_REGISTRY_IMAGE/sandbox:latest
+    - docker images
+    
+deploy wso2-sandbox:
+  stage: deploy
+  variables:
+    GIT_STRATEGY: none 
+  tags:
+    - linux-shell
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "sandbox"'
+  script:
+    - oc login -u=${wso2user} -p=${wso2pass} -s=https://api.okd4.ibs.ru:6443 -n=wso2-sandbox --insecure-skip-tls-verify
+    - oc rollout restart deployment/wso2mi
+
+build wso2-prod:
+  stage: build
+  tags:
+    - linux-dind
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk update
+    - apk add openjdk8
+    - apk add maven
+    - apk add curl     
+    - export PATH=${PATH}:${JAVA_HOME}/bin
+  script:
+    - if [ ! -f $ci_settings_prod ]; then
+        echo "CI settings missing\! If deploying to GitLab Maven Repository, please see https://docs.gitlab.com/ee/user/packages/maven_repository/index.html#create-maven-packages-with-gitlab-cicd for instructions.";
+      fi
+    - 'echo mvn -f $ci_settings_prod clean install -Dmaven.test.skip=true'
+    - 'mvn -f $ci_settings_prod clean install -Dmaven.test.skip=true'
+    - ls -la OCOIntegration_deploy/target/
+    - ls -la OCOIntegration_docker/
+    - cp -r OCOIntegration_deploy/target/. OCOIntegration_docker/CompositeApps
+    - ls -al OCOIntegration_docker/CompositeApps
+##    - docker login -u $CI_REGISTRY_USER -p $CI_JOB_TOKEN $CI_REGISTRY
+    - docker login -u ikotelnikov -p ${TOKEN} $CI_REGISTRY
+    - echo list of existing images
+    - docker images
+    - echo "Building prod image"
+    - cd OCOIntegration_docker
+    # Change image in Dockerfile
+    - sed -i '/^FROM.*/c\FROM gitlabsup.ibs.ru:5050/oco/wso2mi-image/wso2mi' ./Dockerfile
+    - docker build -t $CI_REGISTRY_IMAGE/prod:latest .
+    - echo "Pushing image with tag = $CI_REGISTRY_IMAGE:latest"
+    - docker push $CI_REGISTRY_IMAGE/prod:latest
+    - docker images
+    
+deploy wso2-prod:
+  stage: deploy
+  variables:
+    GIT_STRATEGY: none 
+  tags:
+    - linux-shell
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  script:
+    - oc login -u=${wso2user} -p=${wso2pass} -s=https://api.okd4.ibs.ru:6443 -n=wso2-prod
+    - oc rollout restart deployment/wso2mi

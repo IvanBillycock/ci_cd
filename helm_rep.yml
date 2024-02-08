@@ -1,0 +1,47 @@
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2 
+  CHART_REPO_URL: "${CI_SERVER_URL}/api/v4/projects/${CI_PROJECT_ID}/packages/helm/api/stable/charts"
+
+services:
+  - name: docker:dind
+    alias: docker
+stages:
+  - build
+  - publish-charts
+
+."Docker build":
+  stage: build
+  tags:
+    - linux-dind
+  script:
+    - docker login -u ikotelnikov -p ${TOKEN} $CI_REGISTRY_IMAGE
+    - docker build -t $CI_REGISTRY_IMAGE/helm-curl:latest .
+    - docker push $CI_REGISTRY_IMAGE/helm-curl:latest
+    - docker images
+
+"publish charts":
+  image: gitlabsup.ibs.ru:5050/oco/charts-repo/helm-curl:latest
+  stage: publish-charts
+  tags:
+    - linux-dind
+  script:
+    - ls -d */
+    - helm repo add --username  ${REGISTRY_LOGIN} --password ${REGISTRY_TOKEN} oco https://gitlabsup.ibs.ru/api/v4/projects/182/packages/helm/stable
+    - for dir in $(ls -d */); do helm package ${dir%%/} -d .packages/; done
+    - |
+      find .packages -mindepth 1 -maxdepth 1 -type f -name '*.tgz' -exec sh -c 'basename "$0"' '{}' \; | 
+      while read package; 
+      do name=${package%-*}; version=${package##*-}; v=${version%.tgz};
+      echo "---   ---   ---   ---   ---"
+      echo $package
+      helm search repo oco/$name --version $v;
+      exists=$(helm search repo oco/$name --version $v);
+      if [[ $exists = "No results found" ]]; then
+      echo "POST --- $package"
+      curl --request POST --form "chart=@.packages/$package" --user ${REGISTRY_LOGIN}:${REGISTRY_TOKEN} https://gitlabsup.ibs.ru/api/v4/projects/182/packages/helm/api/stable/charts
+      sleep 2
+      else
+      echo "Chart already exists. Skip!"
+      fi
+      done
